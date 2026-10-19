@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Arcade</title>
+<style>
+:root{
+  --bg:#f6f6f9;--surface:#fff;--text:#1b1b24;--muted:#6b6b7d;--line:#e2e2ea;--accent:#5b5bf0;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0f0f16;--surface:#181824;--text:#e8e8f2;--muted:#9a9ab0;--line:#2a2a3a;--accent:#8b8bff}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0 8px 0 0;letter-spacing:.02em}
+input[type=search],select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+input[type=search]{flex:1;min-width:160px;max-width:420px}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13px;cursor:pointer}
+#count{margin-left:auto;color:var(--muted);font-size:13px}
+main{padding:16px;max-width:1300px;margin:0 auto}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{all:unset;box-sizing:border-box;display:flex;width:100%;cursor:pointer;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px;transition:transform .12s,border-color .12s}
+.card:hover,.card:focus-visible{transform:translateY(-2px);border-color:var(--accent)}
+.tile{width:100%;aspect-ratio:4/3;border-radius:10px;display:grid;place-items:center;font-size:34px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.25)}
+.name{width:100%;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:2.7em}
+.cardwrap{position:relative}
+.star{all:unset;position:absolute;top:14px;right:14px;cursor:pointer;font-size:18px;line-height:1;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6);padding:2px 4px;border-radius:6px}
+.star.on{color:#ffd24a}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+/* player */
+#player{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#player.open{display:flex}
+#bar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+#title{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button.btn{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:7px 12px;cursor:pointer}
+button.btn:hover{border-color:var(--accent)}
+#frameWrap{flex:1;position:relative;background:#000}
+iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+#loading{position:absolute;inset:0;display:grid;place-items:center;color:#aaa;pointer-events:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Arcade</h1>
+  <input id="q" type="search" placeholder="Search games…" autocomplete="off" aria-label="Search games">
+  <select id="sort" aria-label="Sort">
+    <option value="az">A–Z</option>
+    <option value="new">Newest</option>
+  </select>
+  <label class="chk"><input id="onlyNamed" type="checkbox" checked> Hide unnamed</label>
+  <label class="chk"><input id="onlyFav" type="checkbox"> Favorites</label>
+  <span id="count"></span>
+</header>
+<main>
+  <div id="grid"></div>
+  <div id="empty" class="empty" hidden>No games match.</div>
+</main>
+
+<div id="player" role="dialog" aria-modal="true" aria-label="Game">
+  <div id="bar">
+    <span id="title"></span>
+    <button class="btn" id="fs">Fullscreen</button>
+    <button class="btn" id="newtab">Open in new tab</button>
+    <button class="btn" id="close">Close</button>
+  </div>
+  <div id="frameWrap"><div id="loading">Loading…</div></div>
+</div>
+
+<script>
+// Folder (relative to this page) that contains the game .html files.
+var GAMES_DIR = "games/";
+
+// OPTIONAL: load the games from a GitHub repo (your fork) through jsDelivr
+// instead of from the local games/ folder. Example:
+//   var REMOTE_BASE = "https://cdn.jsdelivr.net/gh/YOURUSERNAME/html@main/";
+// Leave it as "" to use the local folder. Games marked "direct" (the two
+// large Eaglercraft clients) always load from the local folder.
+var REMOTE_BASE = "https://cdn.jsdelivr.net/gh/GabeDude505/ma-thal-gebra@main/";
+var blobUrl = null;
+function gameUrl(g) { if (g.url) return g.url; return (REMOTE_BASE && !g.direct ? REMOTE_BASE : GAMES_DIR) + g.file; }
+
+var games = [], favs = new Set(), current = null;
+var $ = function (s) { return document.querySelector(s); };
+
+try { favs = new Set(JSON.parse(localStorage.getItem("favs") || "[]")); } catch (e) {}
+function saveFavs() { try { localStorage.setItem("favs", JSON.stringify(Array.from(favs))); } catch (e) {} }
+
+function hue(id) { return (id * 47) % 360; }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+function render() {
+  var q = $("#q").value.trim().toLowerCase();
+  var onlyNamed = $("#onlyNamed").checked, onlyFav = $("#onlyFav").checked;
+  var list = games.filter(function (g) {
+    if (onlyNamed && !g.named) return false;
+    if (onlyFav && !favs.has(g.id)) return false;
+    return !q || g.name.toLowerCase().indexOf(q) !== -1 || String(g.id) === q;
+  });
+  if ($("#sort").value === "az") list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  else list.sort(function (a, b) { return b.id - a.id; });
+  $("#count").textContent = list.length + " games";
+  $("#empty").hidden = list.length > 0;
+  var html = "";
+  list.forEach(function (g) {
+    html += '<div class="cardwrap"><button class="card" data-id="' + g.id + '">' +
+      '<div class="tile" style="background:linear-gradient(135deg,hsl(' + hue(g.id) + ',65%,52%),hsl(' + ((hue(g.id) + 40) % 360) + ',65%,38%))">' +
+      esc(g.name.charAt(0).toUpperCase()) + '</div><div class="name">' + esc(g.name) + '</div></button>' +
+      '<button class="star' + (favs.has(g.id) ? " on" : "") + '" data-fav="' + g.id + '" aria-label="Favorite">' + (favs.has(g.id) ? "★" : "☆") + '</button></div>';
+  });
+  $("#grid").innerHTML = html;
+}
+
+// Remove the analytics snippet that is injected at the top of these files.
+function stripTracking(src) {
+  return src
+    .replace(/<script[^>]*googletagmanager\.com[^>]*><\/script>/gi, "")
+    .replace(/<script>\s*window\.dataLayer[\s\S]*?gtag\('config'[^)]*\);\s*<\/script>/gi, "");
+}
+
+function openGame(g) {
+  if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+  current = g;
+  location.hash = "play=" + g.id;
+  $("#title").textContent = g.name;
+  $("#player").classList.add("open");
+  $("#loading").style.display = "grid";
+  var old = $("#frameWrap iframe"); if (old) old.remove();
+  var f = document.createElement("iframe");
+  f.setAttribute("allow", "fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope");
+  f.setAttribute("allowfullscreen", "");
+  var url = gameUrl(g);
+  f.onload = function () { $("#loading").style.display = "none"; };
+  $("#frameWrap").appendChild(f);
+  // "url" in gams.json = a full address on a host that serves real HTML: embed it directly.
+  if (g.url) { f.src = url; return; }
+  // Large single-file clients: fetch as a blob and run it as HTML, so it works even when the
+  // host (for example jsDelivr) serves .html files as plain text.
+  if (g.direct) {
+    fetch(url).then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); }).then(function (b) {
+      if (current !== g) return;
+      blobUrl = URL.createObjectURL(new Blob([b], { type: "text/html" }));
+      f.src = blobUrl;
+    }).catch(function () { if (current === g) f.src = url; });
+    return;
+  }
+  fetch(url).then(function (r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.text();
+  }).then(function (t) {
+    if (current !== g) return;
+    f.srcdoc = stripTracking(t);
+  }).catch(function () {
+    if (current === g) f.src = url;
+  });
+}
+
+function closeGame() {
+  current = null;
+  if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+  $("#player").classList.remove("open");
+  var f = $("#frameWrap iframe"); if (f) f.remove();
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
+$("#grid").addEventListener("click", function (e) {
+  var s = e.target.closest("[data-fav]");
+  if (s) {
+    var id = +s.dataset.fav;
+    if (favs.has(id)) favs.delete(id); else favs.add(id);
+    saveFavs(); render(); return;
+  }
+  var c = e.target.closest("[data-id]");
+  if (c) openGame(games.find(function (g) { return g.id === +c.dataset.id; }));
+});
+$("#close").onclick = closeGame;
+$("#fs").onclick = function () {
+  var f = $("#frameWrap iframe"); if (f && f.requestFullscreen) f.requestFullscreen();
+};
+$("#newtab").onclick = function () {
+  if (!current) return;
+  // Hosts such as jsDelivr serve .html as plain text, so reopen this launcher on the game instead.
+  window.open(location.pathname + location.search + "#play=" + current.id, "_blank", "noopener");
+};
+document.addEventListener("keydown", function (e) { if (e.key === "Escape" && current && !document.fullscreenElement) closeGame(); });
+["#q", "#sort", "#onlyNamed", "#onlyFav"].forEach(function (s) { $(s).addEventListener("input", render); });
+
+fetch("gams.json").then(function (r) { return r.json(); }).then(function (data) {
+  games = data; render();
+  var m = location.hash.match(/play=(\d+)/);
+  if (m) { var g = games.find(function (x) { return x.id === +m[1]; }); if (g) openGame(g); }
+}).catch(function () {
+  $("#empty").hidden = false;
+  $("#empty").textContent = "Could not load gams.json. Serve this folder over http(s) rather than opening the file directly.";
+});
+</script>
+</body>
+</html>
