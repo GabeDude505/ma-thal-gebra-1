@@ -130,10 +130,11 @@ function openGame(g) {
   $("#loading").style.display = "grid";
   var old = $("#frameWrap iframe"); if (old) old.remove();
   var f = document.createElement("iframe");
-  f.setAttribute("allow", "fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope");
+  f.setAttribute("allow", "fullscreen; autoplay; gamepad; clipboard-write; clipboard-read; accelerometer; gyroscope; keyboard-map");
   f.setAttribute("allowfullscreen", "");
+  f.setAttribute("tabindex", "0");
   var url = gameUrl(g);
-  f.onload = function () { $("#loading").style.display = "none"; };
+  f.onload = function () { $("#loading").style.display = "none"; focusGame(); };
   $("#frameWrap").appendChild(f);
   // "dir" in gams.json = a folder holding a multi-file game (index.html plus its assets).
   // The page is fetched and run with <base> pointing at the folder, so it works even when the
@@ -194,13 +195,22 @@ $("#grid").addEventListener("click", function (e) {
 $("#close").onclick = closeGame;
 $("#fs").onclick = function () {
   var f = $("#frameWrap iframe"); if (f && f.requestFullscreen) f.requestFullscreen();
+  focusGame();
 };
 $("#newtab").onclick = function () {
   if (!current) return;
   // Hosts such as jsDelivr serve .html as plain text, so reopen this launcher on the game instead.
   window.open(location.pathname + location.search + "#play=" + current.id, "_blank", "noopener");
 };
-document.addEventListener("keydown", function (e) { if (e.key === "Escape" && current && !document.fullscreenElement) closeGame(); });
+// Esc no longer closes the game (it belongs to the game: it opens the pause menu).
+// Keep keyboard focus inside the game so WASD and every other key reaches it.
+function focusGame() {
+  var f = $("#frameWrap iframe");
+  if (f) { try { f.focus(); if (f.contentWindow) f.contentWindow.focus(); } catch (e) {} }
+}
+$("#frameWrap").addEventListener("mouseenter", focusGame);
+$("#frameWrap").addEventListener("pointerdown", focusGame);
+window.addEventListener("focus", function () { if (current) setTimeout(focusGame, 0); });
 ["#q", "#sort", "#onlyNamed", "#onlyFav"].forEach(function (s) { $(s).addEventListener("input", render); });
 
 fetch("gams.json").then(function (r) { return r.json(); }).then(function (data) {
