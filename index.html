@@ -135,6 +135,21 @@ function openGame(g) {
   var url = gameUrl(g);
   f.onload = function () { $("#loading").style.display = "none"; };
   $("#frameWrap").appendChild(f);
+  // "dir" in gams.json = a folder holding a multi-file game (index.html plus its assets).
+  // The page is fetched and run with <base> pointing at the folder, so it works even when the
+  // host (for example jsDelivr) serves .html files as plain text.
+  if (g.dir) {
+    var dir = new URL(g.dir, location.href).href;
+    var entry = dir + (g.entry || "index.html");
+    fetch(entry).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); }).then(function (t) {
+      if (current !== g) return;
+      var base = '<base href="' + dir + '">';
+      t = /<head[^>]*>/i.test(t) ? t.replace(/<head[^>]*>/i, function (m) { return m + base; }) : base + t;
+      blobUrl = URL.createObjectURL(new Blob([t], { type: "text/html" }));
+      f.src = blobUrl;
+    }).catch(function () { if (current === g) f.src = entry; });
+    return;
+  }
   // "url" in gams.json = a full address on a host that serves real HTML: embed it directly.
   if (g.url) { f.src = url; return; }
   // Large single-file clients: fetch as a blob and run it as HTML, so it works even when the
